@@ -54,3 +54,5 @@ def test_orchestrator():
 def test_itinerary():
     result = voyagent_graph.invoke(build_test_state())
     return result.get("final_itinerary") or "No itinerary generated. Check the terminal."
+from web.routes import router as web_router
+app.include_router(web_router)

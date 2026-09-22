@@ -20,3 +20,4 @@ class TripState(TypedDict):
     budget_breakdown: dict
     budget_status: str   # "ok" | "over_budget" | "insufficient_data"
     budget_note: str
+    travelers: int  # number of people on the trip

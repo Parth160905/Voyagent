@@ -13,7 +13,7 @@ tier) or "claude".
 import json
 import logging
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from dotenv import load_dotenv
 
@@ -23,7 +23,12 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 PROVIDER = os.getenv("LLM_PROVIDER", "gemini").lower()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+# Tried in order. Each Gemini model has its own free-tier daily quota, so when
+# one runs out (HTTP 429) the next one takes over.
+GEMINI_MODELS = [m.strip() for m in os.getenv(
+    "GEMINI_MODELS", "gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
+).split(",") if m.strip()]
+GEMINI_TIMEOUT_MS = 45_000
 CLAUDE_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 KEY_NAMES = {"gemini": "GEMINI_API_KEY", "claude": "ANTHROPIC_API_KEY"}
 
@@ -39,8 +44,11 @@ Rules:
 - Schedule every listed activity exactly once. Group activities that are close together,
   using their addresses.
 - Use the dates exactly as given in "days". Do not work out weekdays yourself.
-- Arrival day: plan lightly after the flight lands. Final day: hotel check-out. If no return
-  flight is in the data, say the return journey is not booked yet.
+- Arrival day: plan lightly after the flight lands. Final day: hotel check-out, then the return
+  flight if one is in the data (use its departure time). If there is no return flight, say the
+  return journey is not booked yet.
+- The trip is for the number of travellers given. All prices already cover every traveller.
+- Hotel prices marked as estimates are estimates; say so once in the budget summary.
 - Copy every price and total exactly as given, in the trip currency. Never recalculate them.
 - If budget_status is "over_budget", open with a short warning based on budget_note.
 
@@ -66,11 +74,15 @@ def _trip_context(state: TripState) -> dict:
     return {
         "origin": state.get("origin"),
         "destination": state.get("destination"),
+        "city": state.get("destination_city_code"),
+        "travellers": state.get("travelers") or 1,
         "days": days,
         "flight": {k: flight.get(k) for k in
-                   ("airline", "departure", "arrival", "cost_in_budget_currency")},
+                   ("airline", "departure", "arrival", "return_departure", "return_arrival",
+                    "stops", "cost_in_budget_currency") if flight.get(k) is not None},
         "hotel": {k: hotel.get(k) for k in
-                  ("name", "rating", "nights", "total_cost_in_budget_currency")},
+                  ("name", "address", "rating", "nights", "total_cost_in_budget_currency",
+                   "price_is_estimate") if hotel.get(k) is not None},
         "activities": [
             {k: a.get(k) for k in ("name", "address", "rating", "estimated_cost")}
             for a in state.get("selected_activities") or []
@@ -85,15 +97,32 @@ def _trip_context(state: TripState) -> dict:
 
 def _generate_with_gemini(prompt: str) -> str:
     from google import genai
+    from google.genai import types
 
-    client = genai.Client()  # reads GEMINI_API_KEY from the environment
-    interaction = client.interactions.create(
-        model=GEMINI_MODEL,
-        system_instruction=SYSTEM_PROMPT,
-        input=prompt,
-        generation_config={"thinking_level": "low"},
-    )
-    return interaction.output_text or ""
+    client = genai.Client(http_options=types.HttpOptions(  # reads GEMINI_API_KEY
+        timeout=GEMINI_TIMEOUT_MS,
+        # Retry only server errors. A 429 means that model's quota is used up, and
+        # the SDK's default is to wait about a minute per retry for the same answer.
+        retry_options=types.HttpRetryOptions(attempts=1, http_status_codes=[500, 502, 503, 504]),
+    ))
+    last_error = None
+    for model in GEMINI_MODELS:
+        for config in ({"thinking_level": "low"}, None):  # retry without config if a model rejects it
+            try:
+                kwargs = {"generation_config": config} if config else {}
+                interaction = client.interactions.create(
+                    model=model, system_instruction=SYSTEM_PROMPT, input=prompt, **kwargs)
+                text = (interaction.output_text or "").strip()
+                if text:
+                    return text
+                break
+            except Exception as exc:
+                last_error = exc
+                if config and "thinking" in repr(exc).lower():
+                    continue
+                logger.warning("Gemini model %s failed, trying the next one: %r", model, exc)
+                break
+    raise RuntimeError(f"All Gemini models failed. Last error: {last_error!r}")
 
 
 def _generate_with_claude(prompt: str) -> str:
@@ -111,6 +140,49 @@ def _generate_with_claude(prompt: str) -> str:
 PROVIDERS = {"gemini": _generate_with_gemini, "claude": _generate_with_claude}
 
 
+def _when(timestamp) -> str:
+    """'2026-12-15T13:48:00' -> '15 Dec at 13:48'."""
+    try:
+        return datetime.fromisoformat(str(timestamp)).strftime("%d %b at %H:%M").lstrip("0")
+    except ValueError:
+        return str(timestamp or "")
+
+
+def _basic_itinerary(ctx: dict) -> str:
+    """Plain plan built without an LLM, used when every model is unavailable,
+    so visitors still get a usable result."""
+    days, flight, hotel = ctx["days"], ctx["flight"], ctx["hotel"]
+    activities = [a["name"] for a in ctx["activities"] if a.get("name")]
+    middle = max(len(days) - 2, 1)
+    per_day = [activities[i::middle] for i in range(middle)]
+
+    lines = [f"# Trip to {ctx.get('city') or ctx['destination']}",
+             f"{len(days)} days for {ctx['travellers']} traveller(s). This is a basic plan "
+             "because the AI writer is unavailable right now.", ""]
+    for i, day in enumerate(days):
+        lines.append(f"## Day {i + 1}: {day}")
+        if i == 0:
+            lines.append(f"- Fly with {flight.get('airline', 'your airline')}, landing {_when(flight.get('arrival'))}.")
+            lines.append(f"- Check in to {hotel.get('name', 'your hotel')}.")
+        elif i == len(days) - 1:
+            lines.append(f"- Check out of {hotel.get('name', 'your hotel')}.")
+            if flight.get("return_departure"):
+                lines.append(f"- Return flight departs {_when(flight['return_departure'])}.")
+            else:
+                lines.append("- Return journey not booked yet.")
+        else:
+            todo = per_day[(i - 1) % middle]
+            lines += [f"- Visit {name}." for name in todo] or ["- Free day to explore."]
+        lines.append("")
+
+    b = ctx.get("budget_breakdown") or {}
+    ccy = b.get("currency", "")
+    lines += ["## Budget summary", "| Item | Amount |", "|---|---|"]
+    lines += [f"| {k.replace('_', ' ').title()} | {v} {ccy} |" for k, v in b.items()
+              if isinstance(v, (int, float))]
+    return "\n".join(lines)
+
+
 # ---------- node ----------
 
 def itinerary_compiler_agent(state: TripState) -> dict:
@@ -122,16 +194,17 @@ def itinerary_compiler_agent(state: TripState) -> dict:
     if PROVIDER not in PROVIDERS:
         return {"final_itinerary": f"Unknown LLM_PROVIDER '{PROVIDER}'. Use 'gemini' or 'claude'."}
 
+    context = _trip_context(state)
     key_name = KEY_NAMES[PROVIDER]
     if not os.getenv(key_name):
-        logger.warning("%s is not set, skipping itinerary generation.", key_name)
-        return {"final_itinerary": f"Itinerary generation skipped: {key_name} is missing from .env."}
+        logger.warning("%s is not set, using the basic itinerary.", key_name)
+        return {"final_itinerary": _basic_itinerary(context)}
 
-    prompt = "Build the itinerary from this trip data:\n\n" + json.dumps(_trip_context(state), indent=2)
+    prompt = "Build the itinerary from this trip data:\n\n" + json.dumps(context, indent=2)
     try:
         text = PROVIDERS[PROVIDER](prompt).strip()
-    except Exception as exc:  # any provider/network error: degrade gracefully, keep the rest of the plan
-        logger.warning("Itinerary generation failed (%s): %r", PROVIDER, exc)
-        return {"final_itinerary": "Itinerary generation failed. Check the server logs."}
+    except Exception as exc:  # quota, outage or timeout: fall back to the basic plan
+        logger.warning("Itinerary generation failed (%s), using the basic itinerary: %r", PROVIDER, exc)
+        return {"final_itinerary": _basic_itinerary(context)}
 
-    return {"final_itinerary": text or "The model returned an empty itinerary."}
+    return {"final_itinerary": text or _basic_itinerary(context)}
