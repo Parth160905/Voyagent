@@ -131,6 +131,14 @@ def plan_trip(req: PlanRequest, request: Request):
         logger.exception("Planner crashed")
         raise HTTPException(500, "Planning failed on our side. Try again in a minute.")
 
+    if not (result.get("flight_results") or []):
+        raise HTTPException(422, (
+            f"No flights found from {req.origin} to {req.destination} on those dates. "
+            "This demo runs on Duffel's test data, which mainly covers major international "
+            "routes. Try one of the examples under the form."))
+    if not (result.get("hotel_results") or []):
+        raise HTTPException(422, f"No hotels found in {req.city}. Try a nearby larger city.")
+
     return {
         "itinerary": result.get("final_itinerary"),
         "budget_status": result.get("budget_status"),
@@ -142,5 +150,6 @@ def plan_trip(req: PlanRequest, request: Request):
                         "cost_in_budget_currency"),
         "hotel": _pick(result.get("selected_hotel"), "name", "address", "rating", "nights",
                        "total_cost_in_budget_currency", "price_is_estimate"),
-        "activities": [a.get("name") for a in result.get("selected_activities") or []],
+        "activities": [{"name": a.get("name"), "estimated_cost": a.get("estimated_cost")}
+                       for a in result.get("selected_activities") or []],
     }

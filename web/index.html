@@ -126,7 +126,12 @@
   const inDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d; };
   $("departure_date").value = iso(inDays(30));
   $("return_date").value = iso(inDays(35));
+  const TYPICAL_BUDGET = { USD: 2500, GBP: 2000, EUR: 2300, INR: 200000, AED: 9000,
+                           SGD: 3300, JPY: 380000, AUD: 3800, CAD: 3400 };
   $("budget_currency").value = "GBP";
+  $("budget_currency").addEventListener("change", (e) => {
+    $("budget_total").value = TYPICAL_BUDGET[e.target.value] ?? $("budget_total").value;
+  });
 
   document.querySelectorAll("[data-trip]").forEach((btn) => btn.addEventListener("click", () => {
     const [o, d, city, budget, ccy, people] = btn.dataset.trip.split(",");
@@ -162,10 +167,13 @@
       facts += `<section><h2>${esc(data.hotel.name)}</h2>
         <p>${esc(data.hotel.nights)} nights${rating}${data.hotel.address ? "<br>" + esc(data.hotel.address) : ""}${est}</p></section>`;
     }
+    if (data.activities && data.activities.length) facts += `<section><h2>Activities</h2>
+      <p>${data.activities.map((a) => esc(a.name) + (a.estimated_cost != null
+          ? ` (${money(a.estimated_cost, ccy)} est.)` : "")).join("<br>")}</p></section>`;
     if (b.total_budget != null) facts += `<section><h2>Budget</h2><table>
       <tr><td>Flight</td><td>${money(b.flight, ccy)}</td></tr>
-      <tr><td>Hotel</td><td>${money(b.hotel, ccy)}</td></tr>
-      <tr><td>Activities</td><td>${money(b.activities, ccy)}</td></tr>
+      <tr><td>Hotel (estimated)</td><td>${money(b.hotel, ccy)}</td></tr>
+      <tr><td>Activities (estimated)</td><td>${money(b.activities, ccy)}</td></tr>
       <tr><td>Set aside for food and transport</td><td>${money(b.contingency, ccy)}</td></tr>
       <tr><td>Left over</td><td>${money(b.unallocated, ccy)}</td></tr>
       <tr><td><strong>Total budget</strong></td><td><strong>${money(b.total_budget, ccy)}</strong></td></tr>
