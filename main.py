@@ -11,7 +11,7 @@ from graph import voyagent_graph
 app = FastAPI()
 
 
-@app.get("/")
+@app.get("/health")
 def health_check():
     return {"status": "ok"}
 
@@ -56,3 +56,9 @@ def test_itinerary():
     return result.get("final_itinerary") or "No itinerary generated. Check the terminal."
 from web.routes import router as web_router
 app.include_router(web_router)
+# Keep the /test-... routes off the public internet: they bypass the rate limits.
+# Run them locally with: ENABLE_TEST_ROUTES=1 uvicorn main:app --reload
+import os
+if os.getenv("ENABLE_TEST_ROUTES", "").lower() not in ("1", "true", "yes"):
+    app.router.routes = [r for r in app.router.routes
+                         if not getattr(r, "path", "").startswith("/test-")]

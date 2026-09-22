@@ -40,6 +40,7 @@ class PlanRequest(BaseModel):
     city: str = Field(min_length=2, max_length=60, description="Destination city name, e.g. New York")
     departure_date: date
     return_date: date
+    travelers: int = Field(default=1, ge=1, le=9, description="Number of people on the trip")
     budget_total: float = Field(gt=0, le=1_000_000)
     budget_currency: str = "USD"
 
@@ -116,6 +117,7 @@ def plan_trip(req: PlanRequest, request: Request):
         "destination_city_code": req.city.strip(),
         "departure_date": req.departure_date.isoformat(),
         "return_date": req.return_date.isoformat(),
+        "travelers": req.travelers,
         "budget_total": req.budget_total,
         "budget_currency": req.budget_currency,
         "flight_results": None,
@@ -134,9 +136,11 @@ def plan_trip(req: PlanRequest, request: Request):
         "budget_status": result.get("budget_status"),
         "budget_note": result.get("budget_note"),
         "budget_breakdown": result.get("budget_breakdown"),
+        "travelers": req.travelers,
         "flight": _pick(result.get("selected_flight"), "airline", "departure", "arrival",
+                        "return_departure", "return_arrival", "stops",
                         "cost_in_budget_currency"),
-        "hotel": _pick(result.get("selected_hotel"), "name", "rating", "nights",
-                       "total_cost_in_budget_currency"),
+        "hotel": _pick(result.get("selected_hotel"), "name", "address", "rating", "nights",
+                       "total_cost_in_budget_currency", "price_is_estimate"),
         "activities": [a.get("name") for a in result.get("selected_activities") or []],
     }

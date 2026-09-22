@@ -87,6 +87,7 @@
     <label>City to explore <input id="city" value="New York" required></label>
     <label>Depart <input id="departure_date" type="date" required></label>
     <label>Return <input id="return_date" type="date" required></label>
+    <label>Travellers <input id="travelers" type="number" min="1" max="9" step="1" value="1" required></label>
     <label>Budget <input id="budget_total" type="number" min="1" step="50" value="2000" required></label>
     <label>Currency
       <select id="budget_currency">
@@ -99,9 +100,9 @@
   <div class="actions">
     <button class="go" id="go" type="submit">Plan my trip</button>
     <div class="examples">Try:
-      <button type="button" data-trip="LHR,JFK,New York,2000,GBP">London to New York</button>
-      <button type="button" data-trip="DEL,DXB,Dubai,120000,INR">Delhi to Dubai</button>
-      <button type="button" data-trip="BOM,SIN,Singapore,150000,INR">Mumbai to Singapore</button>
+      <button type="button" data-trip="LHR,JFK,New York,2000,GBP,1">London to New York</button>
+      <button type="button" data-trip="DEL,DXB,Dubai,120000,INR,2">Delhi to Dubai</button>
+      <button type="button" data-trip="BOM,SIN,Singapore,150000,INR,2">Mumbai to Singapore</button>
     </div>
   </div>
   <p class="status" id="status" role="status" aria-live="polite"></p>
@@ -128,9 +129,9 @@
   $("budget_currency").value = "GBP";
 
   document.querySelectorAll("[data-trip]").forEach((btn) => btn.addEventListener("click", () => {
-    const [o, d, city, budget, ccy] = btn.dataset.trip.split(",");
+    const [o, d, city, budget, ccy, people] = btn.dataset.trip.split(",");
     $("origin").value = o; $("destination").value = d; $("city").value = city;
-    $("budget_total").value = budget; $("budget_currency").value = ccy;
+    $("budget_total").value = budget; $("budget_currency").value = ccy; $("travelers").value = people;
   }));
 
   const money = (n, ccy) => n == null ? "–" :
@@ -147,10 +148,20 @@
     const b = data.budget_breakdown || {}, ccy = b.currency || $("budget_currency").value;
     let facts = "";
     if (data.budget_status === "over_budget") facts += `<p class="warn">${esc(data.budget_note)}</p>`;
-    if (data.flight) facts += `<section><h2>${esc(data.flight.airline)}</h2>
-      <p>Departs ${esc(time(data.flight.departure))}<br>Arrives ${esc(time(data.flight.arrival))}</p></section>`;
-    if (data.hotel) facts += `<section><h2>${esc(data.hotel.name)}</h2>
-      <p>${esc(data.hotel.nights)} nights, rated ${esc(data.hotel.rating)} out of 5</p></section>`;
+    const people = data.travelers > 1 ? `${data.travelers} travellers` : "1 traveller";
+    if (data.flight) {
+      const back = data.flight.return_departure
+        ? `<br>Returns ${esc(time(data.flight.return_departure))}` : "<br>One way only";
+      const stops = data.flight.stops ? `${data.flight.stops} stop(s)` : "Direct";
+      facts += `<section><h2>${esc(data.flight.airline)}</h2>
+        <p>${stops}, ${people}<br>Departs ${esc(time(data.flight.departure))}<br>Arrives ${esc(time(data.flight.arrival))}${back}</p></section>`;
+    }
+    if (data.hotel) {
+      const est = data.hotel.price_is_estimate ? "<br>Nightly price is an estimate" : "";
+      const rating = data.hotel.rating ? `, rated ${esc(data.hotel.rating)} out of 5` : "";
+      facts += `<section><h2>${esc(data.hotel.name)}</h2>
+        <p>${esc(data.hotel.nights)} nights${rating}${data.hotel.address ? "<br>" + esc(data.hotel.address) : ""}${est}</p></section>`;
+    }
     if (b.total_budget != null) facts += `<section><h2>Budget</h2><table>
       <tr><td>Flight</td><td>${money(b.flight, ccy)}</td></tr>
       <tr><td>Hotel</td><td>${money(b.hotel, ccy)}</td></tr>
@@ -173,6 +184,7 @@
     const body = {
       origin: $("origin").value, destination: $("destination").value, city: $("city").value,
       departure_date: $("departure_date").value, return_date: $("return_date").value,
+      travelers: Number($("travelers").value),
       budget_total: Number($("budget_total").value), budget_currency: $("budget_currency").value,
     };
     $("go").disabled = true;
