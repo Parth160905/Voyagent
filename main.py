@@ -1,3 +1,4 @@
+from fastapi.responses import PlainTextResponse
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -49,3 +50,7 @@ def test_activities_agent():
 @app.get("/test-orchestrator")
 def test_orchestrator():
     return voyagent_graph.invoke(build_test_state())
+@app.get("/test-itinerary", response_class=PlainTextResponse)
+def test_itinerary():
+    result = voyagent_graph.invoke(build_test_state())
+    return result.get("final_itinerary") or "No itinerary generated. Check the terminal."
