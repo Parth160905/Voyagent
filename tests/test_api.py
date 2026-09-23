@@ -25,3 +25,8 @@ def test_plan_rejects_non_json_body():
     response = client.post("/api/plan", content="not json",
                            headers={"content-type": "application/json"})
     assert response.status_code == 422
+
+
+def test_stream_rejects_empty_request():
+    response = client.post("/api/plan/stream", json={})
+    assert response.status_code == 422

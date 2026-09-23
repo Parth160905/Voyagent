@@ -219,6 +219,64 @@
     $("results").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }
 
+  const AGENT_LABELS = {
+    flight_agent: "Flights found",
+    hotel_agent: "Hotels found",
+    activities_agent: "Things to do found",
+    budget_allocator: "Budget balanced",
+    itinerary_compiler: "Itinerary written",
+  };
+
+  // Calls the streaming planner, shows each agent as it finishes, and returns
+  // an object shaped like a fetch Response so the submit handler stays the same.
+  async function streamPlan(options) {
+    const res = await fetch("/api/plan/stream", options);
+    if (res.ok === false || res.body == null) return res;
+
+    const finished = [];
+    const showProgress = () => {
+      let next = "Searching flights, hotels and things to do...";
+      if (finished.includes("itinerary_compiler")) next = "Finishing up...";
+      else if (finished.includes("budget_allocator")) next = "Writing your day-by-day plan...";
+      else if (finished.length >= 3) next = "Balancing your budget...";
+      const ticks = finished.map((a) => "✓ " + (AGENT_LABELS[a] || a));
+      $("status").textContent = ticks.concat(next).join("  ·  ");
+    };
+    showProgress();
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let cut;
+      while ((cut = buffer.indexOf("\n\n")) >= 0) {
+        const chunk = buffer.slice(0, cut);
+        buffer = buffer.slice(cut + 2);
+        let event = "message";
+        let data = "";
+        for (const line of chunk.split("\n")) {
+          if (line.startsWith("event: ")) event = line.slice(7);
+          else if (line.startsWith("data: ")) data += line.slice(6);
+        }
+        if (data === "") continue;  // comments like ": keep-alive"
+        const payload = JSON.parse(data);
+        if (event === "agent_done") {
+          finished.push(payload.agent);
+          showProgress();
+        } else if (event === "result") {
+          return { ok: true, status: 200, json: async () => payload };
+        } else if (event === "error") {
+          return { ok: false, status: payload.status || 500,
+                   json: async () => ({ detail: payload.detail }) };
+        }
+      }
+    }
+    throw new Error("Planner stream ended without a result");
+  }
+
   $("form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const body = {
@@ -231,7 +289,7 @@
     $("status").classList.remove("error");
     $("status").textContent = "Searching flights, hotels and things to do. This takes about 30 seconds.";
     try {
-      const res = await fetch("/api/plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const res = await streamPlan({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const d = data.detail;

@@ -13,7 +13,12 @@ from collections import defaultdict, deque
 from datetime import date, timedelta
 from pathlib import Path
 
+import json
+import queue
+import threading
+
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -182,6 +187,10 @@ def place_suggestions(request: Request, q: str = ""):
 
 @router.post("/api/plan")
 def plan_trip(req: PlanRequest, request: Request):
+    return _plan(req, request)
+
+
+def _plan(req, request, on_progress=None):
     key = req.model_dump_json()
     hit = _plan_cache.get(key)
     if hit and time.time() - hit[0] < PLAN_CACHE_SECONDS:
@@ -206,7 +215,7 @@ def plan_trip(req: PlanRequest, request: Request):
         "final_itinerary": None,
     }
     try:
-        result = voyagent_graph.invoke(state)
+        result = _run_graph(state, on_progress)
     except Exception:
         logger.exception("Planner crashed")
         raise HTTPException(500, "Planning failed on our side. Try again in a minute.")
@@ -240,3 +249,58 @@ def plan_trip(req: PlanRequest, request: Request):
     _plan_cache[key] = (time.time(), answer)
     logger.info("Planned %s-%s in %.1fs", req.origin, req.destination, time.time() - started)
     return answer
+
+
+def _run_graph(state, on_progress=None):
+    """Run the agent graph. With a callback, report each agent as it finishes."""
+    if on_progress is None:
+        return voyagent_graph.invoke(state)
+    result = dict(state)
+    for update in voyagent_graph.stream(state, stream_mode="updates"):
+        for node, changes in update.items():
+            if changes:
+                result.update(changes)
+            on_progress(node)
+    return result
+
+
+def _sse(event, data):
+    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
+@router.post("/api/plan/stream")
+def plan_trip_stream(req: PlanRequest, request: Request):
+    """Same as /api/plan, but streams agent progress as Server-Sent Events."""
+    events = queue.Queue()
+
+    def progress(node):
+        events.put(("agent_done", {"agent": node}))
+
+    def worker():
+        try:
+            events.put(("result", _plan(req, request, on_progress=progress)))
+        except HTTPException as exc:
+            events.put(("error", {"status": exc.status_code, "detail": exc.detail}))
+        except Exception:
+            logger.exception("Streaming planner crashed")
+            events.put(("error", {"status": 500,
+                                  "detail": "Planning failed on our side. Try again in a minute."}))
+        finally:
+            events.put(None)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def stream():
+        yield ": connected\n\n"
+        while True:
+            try:
+                item = events.get(timeout=15)
+            except queue.Empty:
+                yield ": keep-alive\n\n"
+                continue
+            if item is None:
+                break
+            yield _sse(*item)
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
