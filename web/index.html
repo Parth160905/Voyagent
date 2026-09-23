@@ -130,14 +130,17 @@
   const TYPICAL_BUDGET = { USD: 2500, GBP: 2000, EUR: 2300, INR: 200000, AED: 9000,
                            SGD: 3300, JPY: 380000, AUD: 3800, CAD: 3400 };
   $("budget_currency").value = "GBP";
+  let budgetTouched = false;
+  $("budget_total").addEventListener("input", () => { budgetTouched = true; });
   $("budget_currency").addEventListener("change", (e) => {
+    if (budgetTouched) return;                     // never overwrite a budget you typed
     $("budget_total").value = TYPICAL_BUDGET[e.target.value] ?? $("budget_total").value;
   });
 
   document.querySelectorAll("[data-trip]").forEach((btn) => btn.addEventListener("click", () => {
     const [o, d, city, budget, ccy, people] = btn.dataset.trip.split(",");
     $("origin").value = o; $("destination").value = d; $("city").value = city;
-    $("budget_total").value = budget; $("budget_currency").value = ccy; $("travelers").value = people;
+    $("budget_total").value = budget; $("budget_currency").value = ccy; budgetTouched = true; $("travelers").value = people;
   }));
 
   // Suggest airports and cities as the visitor types (any place worldwide).
@@ -159,7 +162,13 @@
   const money = (n, ccy) => n == null ? "–" :
     new Intl.NumberFormat(undefined, { style: "currency", currency: ccy, maximumFractionDigits: 0 }).format(n);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-  const time = (s) => s ? s.replace("T", " at ").slice(0, 19).replace(/:00$/, "") : "";
+  const time = (s) => {
+    if (!s) return "";
+    const d = new Date(s);
+    return isNaN(d) ? String(s).replace("T", " at ").slice(0, 16)
+      : `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })} at `
+        + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  };
 
   function showError(message) {
     $("status").textContent = message;
@@ -186,6 +195,10 @@
       facts += `<section><h2>${esc(data.hotel.name)}</h2>
         <p>${esc(data.hotel.nights)} nights${rating}${data.hotel.address ? "<br>" + esc(data.hotel.address) : ""}${est}</p></section>`;
     }
+    const others = (data.hotel_options || []).filter((h) => !h.selected);
+    if (others.length) facts += `<section><h2>Other hotels considered</h2>
+      <p style="margin:0 0 .35rem;font-size:.95rem">Prices are estimates for your dates.</p>
+      <p>${others.map((h) => `${esc(h.name)}${h.rating ? ` (${esc(h.rating)}★)` : ""} &middot; ${money(h.total_cost_in_budget_currency, ccy)}`).join("<br>")}</p></section>`;
     if (data.activities && data.activities.length) facts += `<section><h2>Activities</h2>
       <p>${data.activities.map((a) => esc(a.name) + (a.estimated_cost != null
           ? ` (${money(a.estimated_cost, ccy)} est.)` : "")).join("<br>")}</p></section>`;

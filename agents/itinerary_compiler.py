@@ -44,6 +44,8 @@ Rules:
 - Schedule every listed activity exactly once. Group activities that are close together,
   using their addresses.
 - Use the dates exactly as given in "days". Do not work out weekdays yourself.
+- Write clock times as HH:MM on a 24-hour clock. Never include seconds.
+- If a part of the day has nothing planned, leave that bullet out. Never write "N/A".
 - Arrival day: plan lightly after the flight lands. Final day: hotel check-out, then the return
   flight if one is in the data (use its departure time). If there is no return flight, say the
   return journey is not booked yet.

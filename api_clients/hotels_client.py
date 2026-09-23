@@ -7,6 +7,7 @@ price level is missing). Each hotel is flagged with price_is_estimate.
 """
 
 import os
+import time
 
 import requests
 from dotenv import load_dotenv
@@ -39,7 +40,21 @@ def _estimate_nightly_usd(price_level, rating):
     return 90
 
 
+CACHE_SECONDS = 3600
+_cache = {}
+
+
 def search_hotels_places(city_name, max_results=8):
+    key = (city_name or "").strip().lower()
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < CACHE_SECONDS:
+        return hit[1][:max_results]
+    hotels = _search_hotels_places(key or city_name, max_results)
+    _cache[key] = (time.time(), hotels)
+    return hotels
+
+
+def _search_hotels_places(city_name, max_results=8):
     response = requests.post(
         SEARCH_URL,
         headers={

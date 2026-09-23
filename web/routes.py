@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from api_clients.fx_client import convert
 from api_clients.airports import CITY_AIRPORTS, resolve_airport
 from api_clients.duffel_client import suggest_places
 from graph import voyagent_graph
@@ -34,6 +35,9 @@ CURRENCIES = {"USD", "GBP", "EUR", "INR", "AED", "SGD", "JPY", "AUD", "CAD"}
 _lock = threading.Lock()
 _hits_by_ip = defaultdict(deque)
 _today = {"date": None, "count": 0}
+
+PLAN_CACHE_SECONDS = 900
+_plan_cache = {}
 
 
 class PlanRequest(BaseModel):
@@ -99,6 +103,32 @@ def _enforce_limits(ip: str) -> None:
         _today["count"] += 1
 
 
+def _hotel_options(hotels, chosen, nights, rooms, currency, limit=4):
+    """The best-rated hotels that were considered, priced in the trip currency,
+    so visitors can see what else was on the table."""
+    priced = []
+    for hotel in hotels or []:
+        nightly = hotel.get("price_per_night") or hotel.get("price")
+        try:
+            nightly = float(nightly)
+        except (TypeError, ValueError):
+            continue
+        try:
+            total = convert(nightly * nights * rooms, hotel.get("currency") or currency, currency)
+        except KeyError:
+            continue
+        priced.append({
+            "name": hotel.get("name"),
+            "rating": hotel.get("rating"),
+            "address": hotel.get("address"),
+            "total_cost_in_budget_currency": round(total, 2),
+            "price_is_estimate": bool(hotel.get("price_is_estimate")),
+            "selected": hotel.get("name") == (chosen or {}).get("name"),
+        })
+    priced.sort(key=lambda h: (not h["selected"], -(h["rating"] or 0), h["total_cost_in_budget_currency"]))
+    return priced[:limit]
+
+
 def _pick(d, *keys):
     return {k: (d or {}).get(k) for k in keys} if d else None
 
@@ -136,7 +166,13 @@ def place_suggestions(q: str = ""):
 
 @router.post("/api/plan")
 def plan_trip(req: PlanRequest, request: Request):
+    key = req.model_dump_json()
+    hit = _plan_cache.get(key)
+    if hit and time.time() - hit[0] < PLAN_CACHE_SECONDS:
+        return hit[1]
+
     _enforce_limits(_client_ip(request))
+    started = time.time()
 
     state = {
         "origin": req.origin,
@@ -167,7 +203,7 @@ def plan_trip(req: PlanRequest, request: Request):
     if not (result.get("hotel_results") or []):
         raise HTTPException(422, f"No hotels found in {req.city}. Try a nearby larger city.")
 
-    return {
+    answer = {
         "itinerary": result.get("final_itinerary"),
         "budget_status": result.get("budget_status"),
         "budget_note": result.get("budget_note"),
@@ -178,6 +214,13 @@ def plan_trip(req: PlanRequest, request: Request):
                         "cost_in_budget_currency"),
         "hotel": _pick(result.get("selected_hotel"), "name", "address", "rating", "nights",
                        "total_cost_in_budget_currency", "price_is_estimate"),
+        "hotel_options": _hotel_options(
+            result.get("hotel_results"), result.get("selected_hotel"),
+            max((req.return_date - req.departure_date).days, 1),
+            -(-req.travelers // 2), req.budget_currency),
         "activities": [{"name": a.get("name"), "estimated_cost": a.get("estimated_cost")}
                        for a in result.get("selected_activities") or []],
     }
+    _plan_cache[key] = (time.time(), answer)
+    logger.info("Planned %s-%s in %.1fs", req.origin, req.destination, time.time() - started)
+    return answer

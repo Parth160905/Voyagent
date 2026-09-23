@@ -42,10 +42,10 @@ def search_flights(origin, destination, departure_date, return_date=None, adults
     }}
     response = requests.post(
         OFFER_REQUESTS_URL,
-        params={"return_offers": "true", "supplier_timeout": 20000},
+        params={"return_offers": "true", "supplier_timeout": 8000},
         headers=_headers(),
         json=body,
-        timeout=40,
+        timeout=25,
     )
     response.raise_for_status()
 
