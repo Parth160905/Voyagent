@@ -1,5 +1,7 @@
 # Voyagent
 
+[![tests](https://github.com/Parth160905/Voyagent/actions/workflows/tests.yml/badge.svg)](https://github.com/Parth160905/Voyagent/actions/workflows/tests.yml)
+
 A multi-agent trip planner. Give it two cities, dates, travellers and a budget, and it
 searches flights, hotels and things to do, works out what fits the money, and writes a
 day-by-day plan grounded in what it actually found.

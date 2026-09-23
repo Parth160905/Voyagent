@@ -34,8 +34,10 @@ CURRENCIES = {"USD", "GBP", "EUR", "INR", "AED", "SGD", "JPY", "AUD", "CAD"}
 
 _lock = threading.Lock()
 _hits_by_ip = defaultdict(deque)
+_lookup_hits = defaultdict(deque)
 _today = {"date": None, "count": 0}
 
+LOOKUPS_PER_MINUTE = int(os.getenv("PLACE_LOOKUPS_PER_MINUTE", "40"))
 PLAN_CACHE_SECONDS = 900
 _plan_cache = {}
 
@@ -129,6 +131,19 @@ def _hotel_options(hotels, chosen, nights, rooms, currency, limit=4):
     return priced[:limit]
 
 
+def _enforce_lookup_limit(ip: str) -> None:
+    """Autocomplete calls Duffel, so cap it too. Generous enough for typing,
+    tight enough that nobody can hammer it."""
+    now = time.time()
+    with _lock:
+        hits = _lookup_hits[ip]
+        while hits and now - hits[0] > 60:
+            hits.popleft()
+        if len(hits) >= LOOKUPS_PER_MINUTE:
+            raise HTTPException(429, "Too many place lookups. Slow down a moment.")
+        hits.append(now)
+
+
 def _pick(d, *keys):
     return {k: (d or {}).get(k) for k in keys} if d else None
 
@@ -139,11 +154,12 @@ def planner_page():
 
 
 @router.get("/api/places")
-def place_suggestions(q: str = ""):
+def place_suggestions(request: Request, q: str = ""):
     """Autocomplete for the From and To boxes: any airport or city worldwide."""
     query = (q or "").strip()
     if len(query) < 2:
         return {"places": []}
+    _enforce_lookup_limit(_client_ip(request))
 
     seen, out = set(), []
     for name, code in CITY_AIRPORTS.items():      # popular cities first, no API call
