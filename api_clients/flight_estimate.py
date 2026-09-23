@@ -15,7 +15,8 @@ from api_clients.duffel_client import resolve_place
 logger = logging.getLogger(__name__)
 
 # One-way economy fare per person: a fixed part plus a rate per km, by distance band.
-FARE_BANDS = ((1500, 30, 0.11), (4000, 40, 0.085), (float("inf"), 60, 0.065))
+FARE_BANDS = ((800, 22, 0.045), (2000, 25, 0.035), (6000, 45, 0.032),
+              (float("inf"), 80, 0.028))
 RETURN_DISCOUNT = 0.92   # a round trip costs a little less than two one-ways
 CRUISE_KMH = 750
 
@@ -30,8 +31,8 @@ def _km_between(a, b):
 def _one_way_usd(km):
     for limit, base, per_km in FARE_BANDS:
         if km <= limit:
-            return max(45, base + per_km * km)
-    return max(45, 60 + 0.065 * km)
+            return max(35, base + per_km * km)
+    return max(35, 80 + 0.028 * km)
 
 
 def _at(day, hour):

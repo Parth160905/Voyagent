@@ -25,14 +25,14 @@ MIN_ACTIVITY_RATIO = 0.10
 # Google Places gives a price level (or nothing), not a price. Rough
 # per-person cost in USD, converted to the trip currency later.
 PRICE_LEVEL_COST_USD = {
-    0: 0, 1: 15, 2: 35, 3: 75, 4: 150,
+    0: 0, 1: 10, 2: 25, 3: 60, 4: 120,
     "PRICE_LEVEL_FREE": 0,
-    "PRICE_LEVEL_INEXPENSIVE": 15,
-    "PRICE_LEVEL_MODERATE": 35,
-    "PRICE_LEVEL_EXPENSIVE": 75,
-    "PRICE_LEVEL_VERY_EXPENSIVE": 150,
+    "PRICE_LEVEL_INEXPENSIVE": 10,
+    "PRICE_LEVEL_MODERATE": 25,
+    "PRICE_LEVEL_EXPENSIVE": 60,
+    "PRICE_LEVEL_VERY_EXPENSIVE": 120,
 }
-UNKNOWN_ACTIVITY_COST_USD = 40  # typical ticketed attraction
+UNKNOWN_ACTIVITY_COST_USD = 10  # typical ticketed attraction
 
 FLIGHT_PRICE_KEYS = ("total_amount", "price", "total_price", "amount", "cost")
 HOTEL_TOTAL_KEYS = ("total_price", "total_cost")
@@ -189,6 +189,10 @@ def budget_allocator_agent(state: TripState) -> dict:
                 f"{shortfall:.0f} {ccy} over what the budget allows for them.")
 
     activity_money = max(budget - contingency - f_cost - h_cost, 0)
+    if status == "over_budget":
+        # The trip already breaks the budget; still plan a little sightseeing so the
+        # itinerary isn't empty. The warning and the breakdown show the overspend.
+        activity_money = max(activity_money, budget * MIN_ACTIVITY_RATIO)
     activities, a_cost = _pick_activities(
         state.get("activity_results") or [], activity_money, travelers, nights, ccy
     )
