@@ -90,3 +90,50 @@ def search_hotels(city_code, check_in_date, check_out_date, adults=1):
         }
         for i, name in enumerate(names)
     ]
+
+
+SUGGESTIONS_URL = "https://api.duffel.com/places/suggestions"
+_places_cache = {}
+
+
+def suggest_places(query, limit=6):
+    """Airports and cities matching a name or code, most popular first.
+    Duffel knows thousands of places, so this covers anywhere the built-in
+    city table misses."""
+    query = (query or "").strip()
+    if len(query) < 2:
+        return []
+    if query.lower() in _places_cache:
+        return _places_cache[query.lower()][:limit]
+
+    response = requests.get(SUGGESTIONS_URL, params={"query": query},
+                            headers=_headers(), timeout=15)
+    response.raise_for_status()
+
+    places = []
+    for place in response.json().get("data", []):
+        if not place.get("iata_code"):
+            continue
+        airports = place.get("airports") or []
+        places.append({
+            "iata_code": place["iata_code"],
+            "name": place.get("name"),
+            "type": place.get("type"),                      # "airport" or "city"
+            "city_name": place.get("city_name") or place.get("name"),
+            "latitude": place.get("latitude") or (airports[0].get("latitude") if airports else None),
+            "longitude": place.get("longitude") or (airports[0].get("longitude") if airports else None),
+        })
+    _places_cache[query.lower()] = places
+    return places[:limit]
+
+
+def resolve_place(query):
+    """Turn 'Lucknow' or 'LKO' into a single place with an IATA code."""
+    matches = suggest_places(query, limit=10)
+    if not matches:
+        return None
+    wanted = (query or "").strip().upper()
+    for place in matches:
+        if place["iata_code"] == wanted:
+            return place
+    return matches[0]

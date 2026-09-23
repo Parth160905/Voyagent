@@ -158,8 +158,10 @@
       const back = data.flight.return_departure
         ? `<br>Returns ${esc(time(data.flight.return_departure))}` : "<br>One way only";
       const stops = data.flight.stops ? `${data.flight.stops} stop(s)` : "Direct";
+      const route = data.origin_city && data.destination_city
+        ? `${esc(data.origin_city)} to ${esc(data.destination_city)}<br>` : "";
       facts += `<section><h2>${esc(data.flight.airline)}</h2>
-        <p>${stops}, ${people}<br>Departs ${esc(time(data.flight.departure))}<br>Arrives ${esc(time(data.flight.arrival))}${back}</p></section>`;
+        <p>${route}${stops}, ${people}<br>Departs ${esc(time(data.flight.departure))}<br>Arrives ${esc(time(data.flight.arrival))}${back}</p></section>`;
     }
     if (data.hotel) {
       const est = data.hotel.price_is_estimate ? "<br>Nightly price is an estimate" : "";
