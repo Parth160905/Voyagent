@@ -37,16 +37,16 @@ _today = {"date": None, "count": 0}
 
 
 class PlanRequest(BaseModel):
-    origin: str = Field(min_length=3, max_length=3, description="Origin airport code, e.g. LHR")
-    destination: str = Field(min_length=3, max_length=3, description="Destination airport code, e.g. JFK")
-    city: str = Field(min_length=2, max_length=60, description="Destination city name, e.g. New York")
+    origin: str = Field(min_length=2, max_length=60, description="City or airport, e.g. Lucknow or LKO")
+    destination: str = Field(min_length=2, max_length=60, description="City or airport, e.g. Delhi or DEL")
+    city: str = Field(default="", max_length=60, description="City to explore; defaults to the destination")
     departure_date: date
     return_date: date
     travelers: int = Field(default=1, ge=1, le=9, description="Number of people on the trip")
     budget_total: float = Field(gt=0, le=1_000_000)
     budget_currency: str = "USD"
 
-    @field_validator("origin", "destination", "budget_currency")
+    @field_validator("budget_currency")
     @classmethod
     def _clean_code(cls, value: str) -> str:
         value = value.strip().upper()
