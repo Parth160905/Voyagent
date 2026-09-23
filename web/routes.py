@@ -17,6 +17,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from api_clients.airports import CITY_AIRPORTS, resolve_airport
+from api_clients.duffel_client import suggest_places
 from graph import voyagent_graph
 
 logger = logging.getLogger(__name__)
@@ -104,6 +106,32 @@ def _pick(d, *keys):
 @router.get("/", include_in_schema=False)
 def planner_page():
     return FileResponse(INDEX_HTML)
+
+
+@router.get("/api/places")
+def place_suggestions(q: str = ""):
+    """Autocomplete for the From and To boxes: any airport or city worldwide."""
+    query = (q or "").strip()
+    if len(query) < 2:
+        return {"places": []}
+
+    seen, out = set(), []
+    for name, code in CITY_AIRPORTS.items():      # popular cities first, no API call
+        if name.startswith(query.lower()) and code not in seen:
+            seen.add(code)
+            out.append({"label": f"{name.title()} ({code})"})
+        if len(out) >= 5:
+            break
+    try:
+        for place in suggest_places(query, limit=8):
+            if place["iata_code"] in seen:
+                continue
+            seen.add(place["iata_code"])
+            city = place.get("city_name") or place.get("name")
+            out.append({"label": f"{city} ({place['iata_code']})"})
+    except Exception as exc:
+        logger.warning("Place lookup failed: %r", exc)
+    return {"places": out[:10]}
 
 
 @router.post("/api/plan")

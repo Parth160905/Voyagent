@@ -5,7 +5,10 @@ Turn what a visitor typed into an airport code.
 the planner can explain instead of searching for nothing.
 """
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 # City (or common alias) -> main airport. Not exhaustive; visitors can always
 # type the 3-letter code for anywhere that is missing.
@@ -53,28 +56,46 @@ for _city, _code in CITY_AIRPORTS.items():
     CODE_CITIES.setdefault(_code, _city.title())
 
 
+def _from_duffel(text):
+    """Ask Duffel, which knows every airport and city with an IATA code."""
+    try:
+        from api_clients.duffel_client import resolve_place
+        match = resolve_place(text)
+    except Exception as exc:  # network or key problem: fall back to the table
+        logger.warning("Duffel place lookup failed for %r: %r", text, exc)
+        return None
+    if not match:
+        return None
+    return match["iata_code"], match.get("city_name") or match.get("name") or text.title()
+
+
 def resolve_airport(text: str):
     """Return (airport_code, city_name). Raises ValueError if nothing matches."""
     cleaned = re.sub(r"\s+", " ", str(text or "").strip())
     if not cleaned:
         raise ValueError("Enter a city or a 3-letter airport code.")
 
-    key = cleaned.lower()
-    if key in CITY_AIRPORTS:
-        code = CITY_AIRPORTS[key]
-        return code, cleaned.title()
-
-    if len(cleaned) == 3 and cleaned.isalpha():
-        code = cleaned.upper()
-        return code, CODE_CITIES.get(code, code)
-
-    # "Delhi (DEL)" -> DEL
+    # "Delhi (DEL)" -> DEL, which is what the autocomplete puts in the box.
     bracketed = re.search(r"\(([A-Za-z]{3})\)", cleaned)
     if bracketed:
         code = bracketed.group(1).upper()
-        return code, CODE_CITIES.get(code, code)
+        return code, cleaned.split("(")[0].strip().title() or CODE_CITIES.get(code, code)
 
-    # "Lucknow airport", "Delhi International Airport", "Mumbai, India"
+    key = cleaned.lower()
+    if key in CITY_AIRPORTS:                      # popular cities: no API call
+        return CITY_AIRPORTS[key], cleaned.title()
+
+    if len(cleaned) == 3 and cleaned.isalpha():   # a code like PAT or IXZ
+        code = cleaned.upper()
+        if code in CODE_CITIES:
+            return code, CODE_CITIES[code]
+        return _from_duffel(code) or (code, code)
+
+    found = _from_duffel(cleaned)                 # anywhere else in the world
+    if found:
+        return found
+
+    # Last resort: tidy the text and try the table again
     trimmed = re.sub(r"\b(international|intl|airport|city|india|uk|usa|uae)\b", " ", key)
     trimmed = re.sub(r"[^a-z ]", " ", trimmed)
     trimmed = re.sub(r"\s+", " ", trimmed).strip()
@@ -83,14 +104,5 @@ def resolve_airport(text: str):
     for name, code in CITY_AIRPORTS.items():
         if name in trimmed.split(",")[0]:
             return code, name.title()
-
-    # Not in the table: ask Duffel, which knows thousands of airports and cities.
-    try:
-        from api_clients.duffel_client import resolve_place
-        match = resolve_place(cleaned)
-    except Exception:
-        match = None
-    if match:
-        return match["iata_code"], match.get("city_name") or match.get("name") or cleaned.title()
 
     raise ValueError(f"Could not find an airport for '{cleaned}'. Try the 3-letter code.")

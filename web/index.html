@@ -139,6 +139,22 @@
     $("budget_total").value = budget; $("budget_currency").value = ccy; $("travelers").value = people;
   }));
 
+  // Suggest airports and cities as the visitor types (any place worldwide).
+  let lookupTimer;
+  const lookupPlaces = (box) => {
+    clearTimeout(lookupTimer);
+    lookupTimer = setTimeout(async () => {
+      const q = box.value.trim();
+      if (q.length < 2) return;
+      try {
+        const res = await fetch(`/api/places?q=${encodeURIComponent(q)}`);
+        const { places } = await res.json();
+        $("cities").innerHTML = places.map((p) => `<option value="${esc(p.label)}"></option>`).join("");
+      } catch { /* suggestions are optional */ }
+    }, 250);
+  };
+  ["origin", "destination"].forEach((id) => $(id).addEventListener("input", () => lookupPlaces($(id))));
+
   const money = (n, ccy) => n == null ? "–" :
     new Intl.NumberFormat(undefined, { style: "currency", currency: ccy, maximumFractionDigits: 0 }).format(n);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
