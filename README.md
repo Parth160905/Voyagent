@@ -6,7 +6,7 @@ day-by-day plan grounded in what it actually found.
 
 **Live demo:** https://voyagent-ecdu.onrender.com
 
-![Voyagent planning a trip from Lucknow to Mumbai](docs/screenshot.png)
+![Voyagent planning a trip from Lucknow to Mumbai](docs/preview.png)
 
 ## What it does
 
